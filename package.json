@@ -2,7 +2,7 @@
   "name": "xpp-vscode",
   "displayName": "F&O Studio for VS Code",
   "description": "Dynamics 365 Finance & Operations X++ development without Visual Studio: Application Explorer, designers, X++ code intelligence, build, deploy, debugging, data, performance and trace analysis, and Copilot agent tools on the real metadata API.",
-  "version": "0.14.1",
+  "version": "0.15.6",
   "publisher": "MNazmi",
   "icon": "media/icon.png",
   "galleryBanner": {
@@ -164,11 +164,36 @@
               "processName": {
                 "type": "string",
                 "default": "AXHost.exe",
-                "description": "Process to attach to in the environment."
+                "description": "Process to attach to in the environment. On cloud-hosted and VHD environments, e.g. Batch.exe to debug the batch server; without it the debugger attaches to the AOS of the runtime host type set in Visual Studio's Dynamics 365 options (IIS or IIS Express)."
               },
               "justMyCode": {
                 "type": "boolean",
-                "default": true
+                "default": true,
+                "description": "Step only through code that has symbols loaded. On by default, as in Visual Studio. Turning it off makes every exception the environment throws go through the debugger, which can make the environment stop responding."
+              },
+              "additionalModules": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "More modules whose symbols load, added to the ones F&O Studio picks (your packages and the module of each standard element with a breakpoint). Wildcards allowed, e.g. \"Dynamics.AX.ApplicationSuite.Forms.*.netmodule\". Each extra module makes loading slower.",
+                "default": []
+              },
+              "symbolOptions": {
+                "type": "object",
+                "description": "Replaces F&O Studio's symbol options entirely (vsdbg symbolOptions, e.g. moduleFilter). Use additionalModules to add modules instead."
+              },
+              "logging": {
+                "type": "object",
+                "description": "vsdbg logging options, e.g. { \"exceptions\": false } to stop printing exceptions in the Debug Console.",
+                "properties": {
+                  "exceptions": {
+                    "type": "boolean"
+                  },
+                  "moduleLoad": {
+                    "type": "boolean"
+                  }
+                }
               },
               "sourceFileMap": {
                 "type": "object",
@@ -230,10 +255,6 @@
       {
         "language": "xpp",
         "path": "./snippets/xpp.json"
-      },
-      {
-        "language": "kusto",
-        "path": "./snippets/kusto.json"
       }
     ],
     "viewsContainers": {
@@ -322,6 +343,82 @@
         ]
       }
     ],
+    "chatAgents": [
+      {
+        "path": "./agents/developer.agent.md"
+      },
+      {
+        "path": "./agents/reviewer.agent.md"
+      },
+      {
+        "path": "./agents/support.agent.md"
+      },
+      {
+        "path": "./agents/solution-designer.agent.md"
+      },
+      {
+        "path": "./agents/architect.agent.md"
+      },
+      {
+        "path": "./agents/security.agent.md"
+      },
+      {
+        "path": "./agents/performance.agent.md"
+      },
+      {
+        "path": "./agents/upgrade.agent.md"
+      },
+      {
+        "path": "./agents/integration.agent.md"
+      },
+      {
+        "path": "./agents/test-engineer.agent.md"
+      },
+      {
+        "path": "./agents/report-developer.agent.md"
+      },
+      {
+        "path": "./agents/workflow.agent.md"
+      },
+      {
+        "path": "./agents/release-manager.agent.md"
+      },
+      {
+        "path": "./agents/archaeologist.agent.md"
+      },
+      {
+        "path": "./agents/explainer.agent.md"
+      },
+      {
+        "path": "./agents/setup-advisor.agent.md"
+      },
+      {
+        "path": "./agents/data-investigator.agent.md"
+      },
+      {
+        "path": "./agents/triage.agent.md"
+      },
+      {
+        "path": "./agents/role-designer.agent.md"
+      },
+      {
+        "path": "./agents/test-scenarios.agent.md"
+      },
+      {
+        "path": "./agents/fit-gap.agent.md"
+      },
+      {
+        "path": "./agents/data-migration.agent.md"
+      },
+      {
+        "path": "./agents/release-notes.agent.md"
+      }
+    ],
+    "chatInstructions": [
+      {
+        "path": "./agents/fno-agents.instructions.md"
+      }
+    ],
     "taskDefinitions": [
       {
         "type": "xpp",
@@ -337,7 +434,7 @@
               "deploy",
               "syncDatabase"
             ],
-            "description": "buildProject reports the problems of the project's elements; buildModel those of the whole model. deploy deploys the solution's models to the unified environment (pac); syncDatabase synchronizes the database (pac on a unified environment, SyncEngine on cloud-hosted and VHD)."
+            "description": "buildProject reports the problems of the project's elements; buildModel those of the whole model. deploy deploys the package of the active project's model, as built on this machine, to the unified environment; syncDatabase synchronizes the database (through Dataverse on a unified environment, SyncEngine on cloud-hosted and VHD)."
           },
           "model": {
             "type": "string",
@@ -347,10 +444,10 @@
             "type": "string",
             "enum": [
               "None",
-              "Incremental",
+              "Module",
               "Full"
             ],
-            "description": "deploy: database sync after the deploy. Default None."
+            "description": "deploy: database sync after the deploy (Module synchronizes the deployed package). Default None."
           },
           "mode": {
             "type": "string",
@@ -1228,12 +1325,12 @@
       },
       {
         "command": "xpp.pac.deploy",
-        "title": "Deploy Models to Environment (pac)",
+        "title": "Deploy Models to Environment",
         "category": "F&O Studio"
       },
       {
         "command": "xpp.pac.dbSync",
-        "title": "Synchronize Database (pac)",
+        "title": "Synchronize Database",
         "category": "F&O Studio"
       },
       {
@@ -2080,6 +2177,10 @@
       ],
       "commandPalette": [
         {
+          "command": "xpp.activity.showChanges",
+          "when": "false"
+        },
+        {
           "command": "xpp.results.rerun",
           "when": "xpp.results.canRerun"
         },
@@ -2379,6 +2480,11 @@
           "default": true,
           "description": "Save unsaved X++ code views before a build, so the compiler sees your latest changes."
         },
+        "xpp.build.restartLocalAos": {
+          "type": "boolean",
+          "default": true,
+          "description": "Cloud-hosted and VHD environments: after a successful build, restart the AOS hosts that are running (IIS Express or the AOS application pool in IIS, and the batch service) so they load the new build, as Visual Studio does. Not used on unified developer environments."
+        },
         "xpp.pacPath": {
           "type": "string",
           "default": "",
@@ -2520,9 +2626,11 @@
     "watch": "tsc -watch -p .",
     "build:server": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-server.ps1",
     "test:server": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-server.ps1 -Test && node scripts/check-bridge-actions.js",
-    "build": "npm run build:server && npm run compile",
-    "package": "vsce package --readme-path docs/FEATURES.md --baseContentUrl https://github.com/nazmolla/xpp-vscode/blob/HEAD/docs --baseImagesUrl https://github.com/nazmolla/xpp-vscode/raw/HEAD/docs",
-    "publish": "vsce publish --readme-path docs/FEATURES.md --baseContentUrl https://github.com/nazmolla/xpp-vscode/blob/HEAD/docs --baseImagesUrl https://github.com/nazmolla/xpp-vscode/raw/HEAD/docs"
+    "build:tools": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-pdb2pdb.ps1",
+    "build": "npm run build:server && npm run build:tools && npm run compile",
+    "agents": "node scripts/build-agents.js",
+    "package": "npm run build:tools && vsce package --readme-path docs/FEATURES.md --baseContentUrl https://github.com/nazmolla/xpp-vscode/blob/HEAD/docs --baseImagesUrl https://github.com/nazmolla/xpp-vscode/raw/HEAD/docs",
+    "publish": "npm run build:tools && vsce publish --readme-path docs/FEATURES.md --baseContentUrl https://github.com/nazmolla/xpp-vscode/blob/HEAD/docs --baseImagesUrl https://github.com/nazmolla/xpp-vscode/raw/HEAD/docs"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

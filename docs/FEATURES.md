@@ -8,6 +8,67 @@ Develop Dynamics 365 Finance & Operations X++ code in VS Code, without Visual St
 
 ![Application Explorer filtered on CustGroup](images/aot.png)
 
+## What's new in 0.15
+
+**0.15.6: Deploy and debug your own code like Visual Studio, on unified, VHD and cloud-hosted environments.**
+
+*Unified developer environments (UDE):*
+- **Deploy Models to Environment** uploads your packages as you built them, through the environment's Dataverse, as Visual Studio's Deploy Models to Online Environment does. Nothing is recompiled, so the environment runs the build you debug. Before, the command recompiled an empty copy of your model with pac's own compiler.
+- Pick the packages to deploy (your project's package is preselected) and the database sync: None, Module (the deployed packages) or Full. Progress shows in the **X++ Deploy** output.
+- **Synchronize Database** also runs through Dataverse. The Power Platform CLI (`pac`) is no longer needed for deploy or database sync.
+- The `deploy` task takes `"dbSync": "None" | "Module" | "Full"`; `Incremental` (which needed an argument file with pac) now runs a Module sync.
+- Breakpoints in your own code stop after the deploy: they bind, step, show variables, and the stop shows in your code view.
+
+*Cloud-hosted and VHD environments, like Visual Studio's F5:*
+- Start debugging and F&O Studio attaches to the AOS of the runtime host type set in Visual Studio's Dynamics 365 options: the AOS site's application pool in IIS, or IIS Express. No process list to pick from. To debug the batch service, set `"processName": "Batch.exe"`.
+- Breakpoints in your own code bind and stop.
+- After a successful build, the AOS hosts that are running (IIS Express or the IIS application pool, and the batch service) restart so they load the new build, as Visual Studio does. The debugger detaches first. The batch service is ended and started again right away; batch tasks that were running are cut off. Turn this off with `xpp.build.restartLocalAos`.
+- Stopping the debugger only detaches; the AOS keeps running.
+- PackagesLocalDirectory and the AOS are found from Visual Studio's Dynamics 365 options, the batch service and the AOS web.config, on any drive.
+- Needs the C# extension (its .NET debugger); F&O Studio offers to install it and waits for its debugger download.
+
+*All environments:* the compiler writes Windows PDBs, which the VS Code debugger can't read, so every successful build converts them to portable PDBs with Microsoft's Pdb2Pdb (included). Visual Studio debugs the converted PDBs too.
+
+*Tested on:*
+- **UDE** (10.0.2790.108): deploy without a database sync, Synchronize Database (Module), then a breakpoint in a class of your own bound, stopped in the code view, stepped and showed variables and the Infolog; standard-code breakpoints as in 0.15.4–0.15.5.
+- **VHD** (10.0.46, on IIS and on IIS Express): build converts the PDBs and restarts the AOS, attach without a process list, breakpoints in your own and in standard code stop, step, continue, Infolog; stopping leaves the AOS running. The new way of restarting the batch service has not been run on a VHD yet.
+- **Cloud-hosted environments** use the same code path as VHD environments but have **not been tested** yet.
+- Not tested yet: deploying with a Module or Full sync, several packages in one deploy, packages larger than 100 MB.
+
+**0.15.5: Debugging shows your code view, and the debugger is configurable.**
+- When the debugger stops in an element, it shows the X++ code view you set the breakpoint in (for example `PurchTable.xpp`), not a separate debug copy of the file.
+- Configure the debugger in `.vscode/launch.json`: `justMyCode`, `additionalModules`, `symbolOptions` and `logging` (see Debugger options under Settings).
+
+**0.15.4: Debugging Microsoft's code uses Visual Studio's debugger settings.**
+- Breakpoints in standard code are set up the way Visual Studio sets them up: Just My Code stays on and only the module that holds the element loads symbols. Before, the environment could stop responding while the debugger was attached.
+- Tip: open the form or run the code once before you start the debugger, so the breakpoint binds right away.
+
+**0.15.3: The debugger never leaves the environment frozen.**
+- While the debugger is stopped (at a breakpoint or after Pause), the environment's server is suspended for every user. Disconnecting, closing or reloading the window now resumes it first and only detaches, never ends it.
+- A debugger left attached by a VS Code window that crashed is stopped the next time F&O Studio starts.
+
+**0.15.2: Breakpoints in Microsoft's code (and in your own) bind and stop on unified developer environments.**
+- A breakpoint in a standard element's code view, for example the `init` method of the PurchTable form, now binds, stops, steps and shows its variables. Before, it stayed hollow with "No symbols have been loaded for this document".
+- The debug source is the element's code as the compiler numbers it (for forms, with their data source and control classes), so breakpoints land on the right line.
+- The breakpoint you set in the code view shows the same state as the one the debugger binds, and breakpoints you add while debugging are picked up right away.
+
+**0.15.1: Fixes from an end-to-end trial of every tool and command.**
+- Run Best Practice Checks no longer fails with "line must be non-negative" (metadata findings without a line).
+- Forms: `xpp_read_object` returns their data sources, and `xpp_validate_object` checks form data sources and controls correctly.
+- Copilot checkpoints no longer block a change when the element's earlier state can't be saved; Revert names that element.
+- Browse Table Data without database credentials asks in a dialog instead of waiting on a notification.
+- New labels show their text in the designer and form preview right away.
+- `xpp_read_label` accepts full references (`@SYS7149`, `@SCM:SalesStatusLabel`); model and object lists mark your own models; exact name matches come first.
+- **Report Problem** on every unexpected error, and it can file the GitHub issue directly with your GitHub sign-in.
+- The Kusto snippets were removed (they needed a Kusto extension); the Telemetry Queries command has the same queries.
+
+- **Copilot agents for developers and functional consultants.** 23 agents in the Copilot agent picker, each with its own instructions and the next agent to hand off to:
+  - **Developers:** F&O Developer, Code Reviewer, Support, Performance, Upgrade Reviewer, Test Engineer, Report Developer, Workflow & Events, Release Manager, Code Archaeologist.
+  - **Developers and consultants:** Solution Designer, Architect, Security & License, Integration.
+  - **Functional consultants:** Functional Explainer, Setup Advisor, Data Investigator, Functional Triage, Role Designer, Test Scenarios, Fit-Gap Analyst, Data Migration, Release Notes. They answer in business terms and use the live environment through the Dynamics 365 ERP MCP server or the browser.
+  - When you haven't picked an agent, Copilot suggests the one that fits, or runs it for a self-contained part of the task. Agents change data, setup or metadata only after you allow it, and never in production.
+- **Find Message Source for mandatory fields.** For "Field '…' must be filled in." it first lists the mandatory table fields with that label (the platform raises it when a field whose Mandatory property is Yes is empty), then code that raises it for one of those fields, and keeps code that reuses the text for other fields apart. `xpp_find_message_source` does the same for agents.
+
 ## What's new in 0.14
 
 **0.14.1: Server internals and a security analysis fix.** Bridge actions, agent tools and element types are each registered once; `tools/list` comes from the same registry that serves the calls, and write checks come from each action's registration. Behaviour is unchanged (every action and tool is checked against a recorded baseline). `xpp_analyze_security` with `op=license` or `op=access` and no `objectName` now says what is missing instead of failing with an internal error.
@@ -70,7 +131,6 @@ Features marked *preview* have not yet been verified on a live environment.
 **Support**
 - **Report a Problem…** builds a redacted diagnostics bundle for you to preview and send yourself; nothing is sent automatically. Every command error offers it.
 - **Configure Code Intelligence…** turns code intelligence features on or off in one place.
-- Kusto snippets (`fno-forms`, `fno-slowforms`, `fno-exceptions`, `fno-events`) for Finance and Operations telemetry in Application Insights.
 
 ### Earlier releases
 - **0.12:** Browse Table Data and SQL queries (temporary UDE credentials, local AxDB), Analyze Performance with live database insights, Analyze Trace, Upgrade Readiness, wizards (batch job, report, approval workflow, custom service), best practice checks, Review My Changes, the Pre-Deploy Checklist, `@fno` in chat, Copilot Activity, team rules, Test Explorer, build tasks and an accessibility pass.
@@ -151,14 +211,14 @@ Turn each feature on or off with **Configure Code Intelligence…**, or with the
 ### Productivity
 - **Search Code in All Packages** (`Ctrl+Shift+Alt+F`): text or regex search over every package's X++ code.
 - **Find Similar Standard Implementations:** standard elements like the selected one, or matching a description such as "batch job with contract".
-- **Find Message Source:** paste an error, warning or info message as the user saw it, values included, to find the labels and the code that raises it. It's also on every Infolog message.
+- **Find Message Source:** paste an error, warning or info message as the user saw it, values included, to find the labels and the code that raises it. For "Field '…' must be filled in." it first lists the mandatory table fields with that label (the platform raises it when a field whose Mandatory property is Yes is empty), then the code that raises it for one of those fields, and keeps code that reuses the text for other fields apart. It's also on every Infolog message.
 - **Quick fixes** (`Ctrl+.`):
   - extract to label;
   - generate `find()` and `exist()`;
   - implement missing interface methods;
   - create a Chain of Command wrapper.
 - **Add to Privilege…**, **Generate SysTest Class**, **Generate SysTest Class with Test Data (ATL)**, and **Run Snippet in Environment**, which runs a `main` method through a scratch class in your model.
-- **Snippets** for Chain of Command, event handlers, SysOperation, find/exist, parm methods, transactions with retry and SysTest, plus Kusto snippets for telemetry.
+- **Snippets** for Chain of Command, event handlers, SysOperation, find/exist, parm methods, transactions with retry and SysTest.
 
 ### Build, test, deploy and debug
 - **Build:**
@@ -172,7 +232,8 @@ Turn each feature on or off with **Configure Code Intelligence…**, or with the
   - tests run the deployed code, and you get a warning when your build is newer than the last deploy.
 - **Deploy:**
   - **Create Deployment Package…** (the same script Visual Studio runs);
-  - **Deploy Models to Environment (pac)**, **Synchronize Database (pac)**, **Initialize Deployment Solution (pac)**;
+  - **Deploy Models to Environment** deploys your packages as built on this machine, as Visual Studio does, and **Synchronize Database** runs a Full or Module sync (both through the environment's Dataverse);
+  - **Initialize Deployment Solution (pac)** and **Sign In to Environment (pac)** set up a Power Platform CLI solution if you deploy with `pac` yourself;
   - **Synchronize Tables** syncs only your project's tables on cloud-hosted and VHD environments.
 - **Debugging:**
   - **Launch Debugger** attaches through the FinOps debugger proxy, as Visual Studio does, and you can set breakpoints in the code view.
@@ -251,12 +312,18 @@ Turn each feature on or off with **Configure Code Intelligence…**, or with the
 - **Connect to Environment…** downloads the metadata, restores the cross-reference database and configures the machine. It shows each step and can retry a failed one.
 - **Select Environment…** (also from the status bar) switches environments without a reload.
   - Each workspace remembers its own environment, so two windows can work with two environments.
-  - **Sign In to Environment (pac)** keeps one pac profile per environment.
+  - **Sign In to Environment (pac)** keeps one pac profile per environment, for your own `pac` commands.
 - **Version drift guard** (*preview*): you get a warning when the environment runs a newer application version. **Update Metadata** downloads it, and **Clean Up Old Application Versions…** removes old versions after a confirmation.
 - **Open Team Repository…** (*preview*): clone or pick a repository, link its packages into the metadata folder and build them in dependency order.
-- **Cloud-hosted and VHD environments** work without a connection step. F&O Studio uses the local PackagesLocalDirectory, AOS and AxDB. Deploy (pac) and Run Tests are UDE-only and are hidden there; the debugger attaches to the local AOS (*preview*, needs the C# extension).
+- **Cloud-hosted and VHD environments** work without a connection step. F&O Studio uses the local PackagesLocalDirectory, AOS and AxDB. Deploy and Run Tests are UDE-only and are hidden there; the debugger attaches to the local AOS (*preview*, needs the C# extension).
 
 ### Copilot
+- **Agents** in the Copilot agent picker, each with its own instructions and next-step handoffs:
+  - **Developers:** F&O Developer, Code Reviewer, Support, Performance, Upgrade Reviewer, Test Engineer, Report Developer, Workflow & Events, Release Manager, Code Archaeologist.
+  - **Developers and consultants:** Solution Designer, Architect, Security & License, Integration.
+  - **Functional consultants:** Functional Explainer, Setup Advisor, Data Investigator, Functional Triage, Role Designer, Test Scenarios, Fit-Gap Analyst, Data Migration, Release Notes. They answer in business terms and use the live environment through the Dynamics 365 ERP MCP server or the browser (they suggest connecting it when it's missing).
+  - When you haven't picked one, Copilot suggests the agent that fits, or runs it for a self-contained part of the task.
+  - Agents change data, setup or metadata only after you allow it, and only in development, sandbox or build environments, never in production.
 - **@fno** in Copilot Chat: `/design`, `/extend`, `/explain`, `/review`, `/support`, `/performance`.
 - **Copilot Activity** shows every tool call agents make, with arguments, duration and result. Changed elements link to their designer.
 - **Checkpoints and scope:**
@@ -294,8 +361,8 @@ The tools are registered automatically. Copilot can:
 | Code editor | X++ code view with completion, definitions, references, Chain of Command implementations, code lens, folding and formatting | Same code layout |
 | Build models, build project | Build Model, Build Project; errors in Problems | Same (xppc, LabelC) |
 | Best practice checks | Run Best Practice Checks on Project | Same (xppbp) |
-| Synchronize database | Synchronize Database (pac on UDE, SyncEngine on cloud-hosted and VHD), Synchronize Tables | Same |
-| Create deployment package, deploy | Create Deployment Package…, Deploy Models to Environment (pac) | Same |
+| Synchronize database | Synchronize Database (Dataverse on UDE, SyncEngine on cloud-hosted and VHD), Synchronize Tables | Same |
+| Create deployment package, deploy | Create Deployment Package…, Deploy Models to Environment | Same: the locally built packages go up through Dataverse |
 | Model management | Create Model…, Update Model Parameters…, View Model Dependencies… | Same |
 | Import/Export project (.axpp) | Import Project…, Export Project… | Same file format |
 | Find references, metadata search, find labels, tag references | Find References, Open Element…, Find Labels…, Find Tag References… | Same cross-reference database |
@@ -316,7 +383,7 @@ The tools are registered automatically. Copilot can:
   - **Unified developer environment:** **Connect to Environment…** installs the metadata, compiler and FinOps tools.
   - **Cloud-hosted or VHD environment:** run VS Code as administrator, as Visual Studio does, to build into PackagesLocalDirectory.
 - SQL Server LocalDB, for cross references.
-- [Power Platform CLI](https://learn.microsoft.com/power-platform/developer/cli/introduction) (`pac`), for deploy and database sync on a UDE.
+- Optional: [Power Platform CLI](https://learn.microsoft.com/power-platform/developer/cli/introduction) (`pac`), only for the `(pac)` commands. Deploy and database sync don't need it.
 - GitHub Copilot, for `@fno` and the agent tools. Verify Changes in the Running App also needs the Dynamics 365 ERP MCP server.
 
 ## Getting started
@@ -342,13 +409,39 @@ The tools are registered automatically. Copilot can:
 | `xpp.build.crossReference` | Update cross references while building |
 | `xpp.build.runAppCheckerRules` | Run AppChecker rules during the build |
 | `xpp.build.saveBeforeBuild` | Save unsaved X++ code views before a build |
-| `xpp.pacPath` | Path to `pac` |
+| `xpp.build.restartLocalAos` | Cloud-hosted and VHD: restart the running AOS hosts (IIS Express or IIS application pool, batch service) after a successful build |
+| `xpp.pacPath` | Path to `pac`, for the `(pac)` commands |
 | `xpp.debuggerProxyPath` | Path to `Microsoft.Dynamics.AX.DebuggerProxy.exe`, if it isn't in the default location |
 | `xpp.erd.depth`, `xpp.erd.direction`, `xpp.erd.fields` | Defaults for the entity relationship diagram |
 | `xpp.security.sodRulesFile` | Segregation of duties rules (JSON); leave empty to use the built-in rules |
 | `xpp.codeIntelligence.*` | Turn code intelligence features on or off (`outline`, `navigation`, `workspaceSymbols`, `completion`, `hover`, `codeLens`, `syntaxCheck`, `obsoleteWarnings`, `formatting`, `eventHandlerIndex`, `semanticHighlighting`, `diagnosticsOnSave`) |
 | `xpp.git.baseBranch` | The branch Review My Changes and Show Changed Elements compare with |
 | `xpp.usageStatistics` | Count command use on this machine only; nothing is sent. Show Usage Statistics lists the counts |
+
+### Debugger options
+
+The debugger works without a configuration. To change it, add an `xpp` configuration to `.vscode/launch.json` (Run and Debug > create a launch.json file > X++), for example:
+
+```json
+{
+  "type": "xpp",
+  "request": "attach",
+  "name": "Attach to Dynamics 365",
+  "justMyCode": true,
+  "additionalModules": ["Dynamics.AX.ApplicationSuite.Forms.*.netmodule"],
+  "logging": { "exceptions": false }
+}
+```
+
+| Option | Description |
+| --- | --- |
+| `justMyCode` | On by default. Turning it off makes every exception the environment throws go through the debugger, which can make the environment stop responding |
+| `additionalModules` | More modules whose symbols load, added to your packages and the module of each standard element with a breakpoint. Wildcards allowed |
+| `symbolOptions` | Replaces the symbol options entirely (vsdbg `symbolOptions`) |
+| `logging` | vsdbg logging, e.g. `{ "exceptions": false }` |
+| `processName`, `sourceFileMap` | Process to attach to (`AXHost.exe`) and extra source mappings |
+
+While the debugger is stopped, the environment's server is paused for every user: continue or disconnect promptly.
 
 ## Status
 

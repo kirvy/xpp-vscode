@@ -12,7 +12,7 @@ It works against a unified developer environment (UDE), or on a cloud-hosted (CH
 - **Build, test, deploy and debug:** X++ compiler with errors in Problems, best-practice checks, SysTest classes in Test Explorer, deployment packages, database sync and the debugger.
 - **Data:** browse table rows, run SQL with an explain plan, and live performance insights; temporary database credentials on unified developer environments, the local AxDB on cloud-hosted and VHD.
 - **Analysis:** performance anti-patterns, performance traces (`.etl`) with call trees and SQL per method, upgrade readiness (obsolete APIs), security licenses, access, gaps and segregation of duties, a pre-deploy checklist and Review My Changes for pull requests.
-- **AI:** 30+ agent tools for Copilot (read, create and extend metadata through the metadata API, search standard code, analyze security and performance, build, test, query data), the `@fno` chat participant, team rules and a Copilot Activity view.
+- **AI:** 30+ agent tools for Copilot (read, create and extend metadata through the metadata API, search standard code, analyze security and performance, build, test, query data), 23 Copilot agents for developers and functional consultants, the `@fno` chat participant, team rules and a Copilot Activity view.
 
 The full list is in the [feature reference](https://github.com/nazmolla/xpp-vscode/blob/main/docs/FEATURES.md).
 
@@ -27,7 +27,7 @@ The full list is in the [feature reference](https://github.com/nazmolla/xpp-vsco
 - Windows.
 - A Dynamics 365 Finance & Operations unified developer environment (**F&O Studio: Connect to Environment** installs the metadata, compiler and FinOps tools), or a cloud-hosted or VHD environment. On a cloud-hosted or VHD environment, run VS Code as administrator, as Visual Studio does, to build into PackagesLocalDirectory.
 - SQL Server LocalDB, for cross references.
-- [Power Platform CLI](https://learn.microsoft.com/power-platform/developer/cli/introduction) (`pac`), for deploy and database sync.
+- Optional: [Power Platform CLI](https://learn.microsoft.com/power-platform/developer/cli/introduction) (`pac`), only for the `(pac)` commands; deploy and database sync don't need it.
 
 ## Getting started
 
@@ -46,7 +46,7 @@ The full list is in the [feature reference](https://github.com/nazmolla/xpp-vsco
 | `xpp.auth.clientId` | Optional Entra app ID for sign-in |
 | `xpp.build.crossReference` | Update cross references while building |
 | `xpp.build.runAppCheckerRules` | Run AppChecker rules during the build |
-| `xpp.pacPath` | Path to `pac` |
+| `xpp.pacPath` | Path to `pac`, for the `(pac)` commands |
 | `xpp.debuggerProxyPath` | Path to `Microsoft.Dynamics.AX.DebuggerProxy.exe`, if not in the default location |
 | `xpp.erd.depth`, `xpp.erd.direction`, `xpp.erd.fields` | Defaults for the entity relationship diagram (also changeable in the diagram) |
 | `xpp.security.sodRulesFile` | Segregation of duties rules (JSON); empty uses the built-in rules |
