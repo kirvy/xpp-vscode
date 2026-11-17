@@ -66,6 +66,10 @@ namespace XppVsCode.Server.Host
         private const string AppPrefix = "Dynamics.AX.Application.";
         private static readonly Regex Whitespace = new Regex(@"\s+", RegexOptions.Compiled);
         private const int MaxMessages = 2000;
+        private const int MaxExpansionNodes = 400;
+        private const int MaxLinearExpansionDepth = 50;
+        private static readonly object TraceSessionsLock = new object();
+        private static readonly Dictionary<string, TraceSession> TraceSessions = new Dictionary<string, TraceSession>(StringComparer.Ordinal);
 
         private enum Kind { Other, Enter, Exit, Sql }
 
@@ -123,23 +127,121 @@ namespace XppVsCode.Server.Host
             }
         }
 
-        public static string AnalyzeJson(string body)
+        internal sealed class TraceSession
         {
-            var json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+            private readonly Dictionary<int, TraceAnalyzer.Node> _nodes = new Dictionary<int, TraceAnalyzer.Node>();
+            private readonly Dictionary<TraceAnalyzer.Node, int> _ids = new Dictionary<TraceAnalyzer.Node, int>();
+
+            public TraceSession(TraceAnalyzer analyzer)
+            {
+                Id = Guid.NewGuid().ToString("N");
+                var pending = new Stack<TraceAnalyzer.Node>(analyzer.Requests.Select(r => r.Root));
+                while (pending.Count > 0)
+                {
+                    var node = pending.Pop();
+                    if (_ids.ContainsKey(node)) continue;
+                    int id = _ids.Count + 1;
+                    _ids[node] = id;
+                    _nodes[id] = node;
+                    foreach (var child in node.Children.Values) pending.Push(child);
+                }
+            }
+
+            public string Id { get; }
+
+            public Dictionary<string, object> Stub(TraceAnalyzer.Node node, int? parentId = null)
+            {
+                var result = new Dictionary<string, object>
+                {
+                    ["id"] = _ids[node],
+                    ["m"] = node.Method,
+                    ["n"] = node.Calls,
+                    ["incl"] = Math.Round(node.Inclusive, 1),
+                    ["excl"] = Math.Round(node.Exclusive, 1),
+                    ["hasChildren"] = node.Children.Count > 0,
+                };
+                if (parentId.HasValue) result["parentId"] = parentId.Value;
+                if (node.SqlCount > 0)
+                {
+                    result["sqlN"] = node.SqlCount;
+                    result["sqlMs"] = Math.Round(node.SqlMs, 1);
+                }
+                return result;
+            }
+
+            public Dictionary<string, object> Expand(int nodeId)
+            {
+                if (!_nodes.TryGetValue(nodeId, out var current))
+                    throw new ArgumentException("Trace node not found: " + nodeId);
+                var nodes = new List<Dictionary<string, object>>();
+                var expanded = new List<int>();
+                for (int depth = 0; depth < MaxLinearExpansionDepth && nodes.Count < MaxExpansionNodes; depth++)
+                {
+                    int parentId = _ids[current];
+                    var children = current.Children.Values.OrderByDescending(c => c.Inclusive).ToList();
+                    int available = MaxExpansionNodes - nodes.Count;
+                    foreach (var child in children.Take(available)) nodes.Add(Stub(child, parentId));
+                    if (children.Count > available)
+                        return new Dictionary<string, object> { ["success"] = true, ["nodes"] = nodes, ["expanded"] = expanded, ["remaining"] = children.Count - available };
+                    expanded.Add(parentId);
+                    if (children.Count != 1) break;
+                    current = children[0];
+                }
+                return new Dictionary<string, object> { ["success"] = true, ["nodes"] = nodes, ["expanded"] = expanded };
+            }
+        }
+
+        public static string HandleJson(string action, string body)
+        {
+            var json = new JavaScriptSerializer
+            {
+                MaxJsonLength = int.MaxValue,
+                RecursionLimit = 128,
+            };
             try
             {
+                if (string.Equals(action, "children", StringComparison.Ordinal))
+                    return json.Serialize(ExpandJson(json, body));
+                if (string.Equals(action, "close", StringComparison.Ordinal))
+                    return json.Serialize(CloseJson(json, body));
+                if (!string.IsNullOrEmpty(action) && !string.Equals(action, "analyze", StringComparison.Ordinal))
+                    throw new ArgumentException("Unknown trace action: " + action);
                 var args = json.Deserialize<Dictionary<string, object>>(body) ?? new Dictionary<string, object>();
                 string Get(string key) => args.TryGetValue(key, out object v) && v != null ? Convert.ToString(v, CultureInfo.InvariantCulture) : null;
                 double minRequestMs = args.TryGetValue("minRequestMs", out object m) && m != null ? Convert.ToDouble(m, CultureInfo.InvariantCulture) : 50;
-                double minNodeMs = args.TryGetValue("minNodeMs", out object n) && n != null ? Convert.ToDouble(n, CultureInfo.InvariantCulture) : 5;
                 var filter = TraceFilter.Create(Get);
                 var analyzer = Analyze(Get("path"), filter, out var info);
-                return json.Serialize(Report(analyzer, info, filter.IsEmpty ? minRequestMs : 0, minNodeMs));
+                var session = new TraceSession(analyzer);
+                lock (TraceSessionsLock)
+                {
+                    while (TraceSessions.Count >= 2) TraceSessions.Remove(TraceSessions.Keys.First());
+                    TraceSessions[session.Id] = session;
+                }
+                return json.Serialize(Report(analyzer, info, filter.IsEmpty ? minRequestMs : 0, session));
             }
             catch (Exception ex) when (ex is ArgumentException || ex is IOException || ex is InvalidOperationException || ex is System.ComponentModel.Win32Exception || ex is UnauthorizedAccessException || ex is FormatException)
             {
                 return json.Serialize(new Dictionary<string, object> { ["success"] = false, ["message"] = ex.Message });
             }
+        }
+
+        private static Dictionary<string, object> ExpandJson(JavaScriptSerializer json, string body)
+        {
+            var args = json.Deserialize<Dictionary<string, object>>(body) ?? new Dictionary<string, object>();
+            string sessionId = args.TryGetValue("traceSessionId", out object s) ? Convert.ToString(s, CultureInfo.InvariantCulture) : null;
+            int nodeId = args.TryGetValue("nodeId", out object n) ? Convert.ToInt32(n, CultureInfo.InvariantCulture) : 0;
+            TraceSession session;
+            lock (TraceSessionsLock) TraceSessions.TryGetValue(sessionId ?? "", out session);
+            if (session == null) throw new ArgumentException("This trace is no longer cached. Reopen the trace and try again.");
+            return session.Expand(nodeId);
+        }
+
+        private static Dictionary<string, object> CloseJson(JavaScriptSerializer json, string body)
+        {
+            var args = json.Deserialize<Dictionary<string, object>>(body) ?? new Dictionary<string, object>();
+            string sessionId = args.TryGetValue("traceSessionId", out object s) ? Convert.ToString(s, CultureInfo.InvariantCulture) : null;
+            lock (TraceSessionsLock) TraceSessions.Remove(sessionId ?? "");
+            return new Dictionary<string, object> { ["success"] = true };
         }
 
         public static string AnalyzeText(string path, double minRequestMs) => AnalyzeText(path, minRequestMs, new TraceFilter());
@@ -507,7 +609,7 @@ namespace XppVsCode.Server.Host
         private static string UserLabel(SessionInfo s) =>
             !string.IsNullOrEmpty(s.UserId) ? s.UserId + (string.IsNullOrEmpty(s.UserGuid) ? "" : $" ({s.UserGuid})") : (s.UserGuid ?? "?");
 
-        private static Dictionary<string, object> Report(TraceAnalyzer analyzer, TraceInfo info, double minRequestMs, double minNodeMs)
+        private static Dictionary<string, object> Report(TraceAnalyzer analyzer, TraceInfo info, double minRequestMs, TraceSession session)
         {
             var requests = info.Requests.Where(r => r.Duration >= minRequestMs || r.Errors + r.Unwinds > 0)
                 .OrderByDescending(r => r.Errors + r.Unwinds > 0).ThenByDescending(r => r.Duration).Take(150).OrderBy(r => r.Start).ToList();
@@ -521,6 +623,7 @@ namespace XppVsCode.Server.Host
                 ["durationMs"] = Math.Round(info.DurationMs, 1),
                 ["events"] = info.Events,
                 ["xppCalls"] = analyzer.XppCalls,
+                ["traceSessionId"] = session.Id,
                 ["filter"] = info.Filter.IsEmpty ? null : info.Filter.Describe(),
                 ["eventCounts"] = info.EventCounts.OrderByDescending(k => k.Value).Take(25).Select(k => new Dictionary<string, object> { ["name"] = k.Key, ["count"] = k.Value }).ToList(),
                 ["aos"] = info.AosEvents.OrderByDescending(k => k.Value).Select(k => new Dictionary<string, object> { ["name"] = k.Key, ["events"] = k.Value }).ToList(),
@@ -563,9 +666,7 @@ namespace XppVsCode.Server.Host
                     ["user"] = m.UserId,
                 }).ToList(),
                 ["requests"] = requests.Select(r =>
-                {
-                    int budget = 400;
-                    return new Dictionary<string, object>
+                    new Dictionary<string, object>
                     {
                         ["aos"] = r.Aos,
                         ["thread"] = r.Thread,
@@ -581,10 +682,9 @@ namespace XppVsCode.Server.Host
                         ["exceptions"] = r.Unwinds,
                         ["sqlN"] = r.SqlCount,
                         ["sqlMs"] = Math.Round(r.SqlMs, 1),
-                        ["tree"] = TraceAnalyzer.TreeJson(r.Root, Math.Max(minNodeMs, r.Duration * 0.002), ref budget),
+                        ["tree"] = session.Stub(r.Root),
                         ["topExclusive"] = TraceAnalyzer.TopExclusive(r.Root, 8).Select(k => new Dictionary<string, object> { ["m"] = k.Key, ["ms"] = Math.Round(k.Value, 1), ["wait"] = IsWait(k.Key) }).ToList(),
-                    };
-                }).ToList(),
+                    }).ToList(),
                 ["methods"] = analyzer.Methods.OrderByDescending(k => k.Value.Exclusive).Take(300).Select(k => new Dictionary<string, object>
                 {
                     ["m"] = k.Key,

@@ -310,32 +310,5 @@ namespace XppVsCode.Server.Analysis
             return path;
         }
 
-        /// <summary>The node and its children down to <paramref name="minMs"/>, at most <paramref name="budget"/> nodes, for the report.</summary>
-        public static Dictionary<string, object> TreeJson(Node node, double minMs, ref int budget)
-        {
-            budget--;
-            var json = new Dictionary<string, object>
-            {
-                ["m"] = node.Method,
-                ["n"] = node.Calls,
-                ["incl"] = Math.Round(node.Inclusive, 1),
-                ["excl"] = Math.Round(node.Exclusive, 1),
-            };
-            if (node.SqlCount > 0)
-            {
-                json["sqlN"] = node.SqlCount;
-                json["sqlMs"] = Math.Round(node.SqlMs, 1);
-            }
-            var children = new List<object>();
-            int hidden = 0;
-            foreach (var child in node.Children.Values.OrderByDescending(c => c.Inclusive))
-            {
-                if (child.Inclusive >= minMs && budget > 0) children.Add(TreeJson(child, minMs, ref budget));
-                else hidden++;
-            }
-            if (children.Count > 0) json["c"] = children;
-            if (hidden > 0) json["hidden"] = hidden;
-            return json;
-        }
     }
 }

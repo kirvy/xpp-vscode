@@ -278,7 +278,7 @@ function findClassOpen(text: string): number {
             return -1;
         }
         if (text[i] === '{') {
-            return /\bclass\b/.test(stripComments(text.slice(0, i))) ? i : -1;
+            return /\b(?:class|interface)\b/.test(stripComments(text.slice(0, i))) ? i : -1;
         }
         i++;
     }
@@ -361,10 +361,11 @@ function skipNonCode(text: string, i: number): number {
         const end = text.indexOf('*/', i + 2);
         return end < 0 ? text.length : end + 2;
     }
-    if (c === '@' && next === '"') {
+    if (c === '@' && (next === '"' || next === '\'')) {
+        const quote = next;
         let j = i + 2;
-        while (j < text.length && !(text[j] === '"' && text[j + 1] !== '"')) {
-            j += text[j] === '"' ? 2 : 1;
+        while (j < text.length && !(text[j] === quote && text[j + 1] !== quote)) {
+            j += text[j] === quote ? 2 : 1;
         }
         return j + 1;
     }
@@ -382,7 +383,7 @@ function skipNonCode(text: string, i: number): number {
 export function methodName(source: string): string {
     const text = source.replace(/\r\n/g, '\n');
     let i = 0;
-    for (;;) {
+    for (; ;) {
         while (i < text.length && /\s/.test(text[i])) {
             i++;
         }
@@ -474,11 +475,12 @@ function topLevelBlocks(text: string): string[] {
             i = end < 0 ? text.length : end + 2;
             continue;
         }
-        if (c === '@' && next === '"') {
-            // Verbatim string: "" is an escaped quote.
+        if (c === '@' && (next === '"' || next === '\'')) {
+            // Verbatim string: a doubled delimiter is an escaped quote.
+            const quote = next;
             i += 2;
-            while (i < text.length && !(text[i] === '"' && text[i + 1] !== '"')) {
-                i += text[i] === '"' ? 2 : 1;
+            while (i < text.length && !(text[i] === quote && text[i + 1] !== quote)) {
+                i += text[i] === quote ? 2 : 1;
             }
             i++;
             continue;

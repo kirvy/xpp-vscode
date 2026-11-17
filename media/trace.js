@@ -23,6 +23,8 @@
     const waits = new Set();
     const searchText = new WeakMap();
     const flat = new WeakMap();
+    const pendingChildren = new Map();
+    let nextTraceRequest = 1;
     const $ = id => document.getElementById(id);
     const persist = () => vscode.setState && vscode.setState({ xpp: (vscode.getState() || {}).xpp, tab: S.tab, showBatch: S.showBatch, includeWaits: S.includeWaits, timelineOpen: S.timelineOpen, reqSort: S.reqSort });
 
@@ -398,10 +400,12 @@
             return;
         }
         renderTree(q);
+        if (q.tree.hasChildren && q.tree.c === undefined) loadChildren(q, q.tree, true);
     }
 
     // ---------- call tree ----------
     function heaviest(n) { return n.c ? n.c.reduce((a, b) => (b.incl > a.incl ? b : a)) : null; }
+    const expandable = n => !!(n.hasChildren || (n.c && n.c.length));
     function defaultExpand(q) {
         const set = new Set([q.tree]);
         const root = q.tree.incl || 1;
@@ -410,11 +414,12 @@
         S.expanded.set(q, set);
         S.focusNode.set(q, q.tree);
     }
-    function expandHotPath(q) {
+    async function expandHotPath(q) {
         const set = S.expanded.get(q) || new Set();
         let n = q.tree, last = n;
         const root = q.tree.incl || 1;
-        while (n && n.c) {
+        while (n && expandable(n)) {
+            if (n.c === undefined && !(await loadChildren(q, n, false))) break;
             set.add(n);
             const next = heaviest(n);
             if (!next || next.incl < root * 0.02) break;
@@ -433,12 +438,51 @@
             for (let p = f.parent.get(n); p; p = f.parent.get(p)) set.add(p);
         }
     }
-    function toggle(q, node) {
-        if (!node.c) return;
+    async function toggle(q, node) {
+        if (!expandable(node)) return;
         const set = S.expanded.get(q);
-        if (set.has(node)) set.delete(node); else set.add(node);
+        if (set.has(node)) set.delete(node);
+        else {
+            if (node.c === undefined && !(await loadChildren(q, node, false))) return;
+            set.add(node);
+        }
         S.focusNode.set(q, node);
         renderTree(q, { focus: true });
+    }
+    function loadChildren(q, node, expand) {
+        if (node.c !== undefined || !node.hasChildren) return Promise.resolve(true);
+        if (node.loading) return node.loading;
+        node.loadError = '';
+        const requestId = nextTraceRequest++;
+        node.loading = new Promise(resolve => pendingChildren.set(requestId, { q, node, expand, resolve }));
+        vscode.postMessage({ type: 'traceChildren', requestId, nodeId: node.id });
+        renderTree(q);
+        return node.loading;
+    }
+    function attachChildren(q, requested, result) {
+        const byId = new Map(flatten(q).all.map(n => [n.id, n]));
+        for (const raw of result.nodes || []) {
+            const node = Object.assign({}, raw);
+            delete node.parentId;
+            byId.set(node.id, node);
+            const parent = byId.get(raw.parentId);
+            if (!parent) continue;
+            if (!parent.c) parent.c = [];
+            if (!parent.c.some(c => c.id === node.id)) parent.c.push(node);
+        }
+        const expandedIds = new Set(result.expanded || []);
+        const set = S.expanded.get(q) || new Set();
+        for (const node of byId.values()) {
+            if (expandedIds.has(node.id)) {
+                if (!node.c) node.c = [];
+                set.add(node);
+            }
+        }
+        if (result.remaining) requested.hidden = result.remaining;
+        if (!requested.c) requested.c = [];
+        S.expanded.set(q, set);
+        flat.delete(q);
+        searchText.delete(q);
     }
     function indentWidth(depth) {
         // Deep stacks (40+ levels) compress after level 16 so names stay readable.
@@ -453,18 +497,19 @@
         const focusNode = S.focusNode.get(q) || q.tree;
         let focusRow = null;
         const walk = (n, depth, pos, size) => {
-            const open = set.has(n) && !!n.c;
+            const canExpand = expandable(n);
+            const open = set.has(n) && canExpand;
             const wait = isWait(n.m);
             const selfShare = n.excl / root;
             const row = h('div', {
                 role: 'row', class: `trow${wait ? ' wait' : ''}${S.filter && lower(n.m).includes(S.filter) ? ' match' : ''}`, tabindex: '-1',
-                'aria-level': depth + 1, 'aria-posinset': pos, 'aria-setsize': size, 'aria-expanded': n.c ? String(open) : null,
+                'aria-level': depth + 1, 'aria-posinset': pos, 'aria-setsize': size, 'aria-expanded': canExpand ? String(open) : null,
                 title: `${n.m}\nTotal ${dur(n.incl)} (${pct(n.incl, root)}) · self ${dur(n.excl)} (${pct(n.excl, root)}) · ${num(n.n)} calls`,
             });
             row.node = n;
             const indent = h('span', { class: 'indent' });
             indent.style.width = `${indentWidth(depth)}px`;
-            const twisty = n.c ? h('span', { class: `twisty codicon codicon-chevron-${open ? 'down' : 'right'}`, 'aria-hidden': 'true' }) : h('span', { class: 'twisty leaf', 'aria-hidden': 'true' });
+            const twisty = canExpand ? h('span', { class: `twisty codicon codicon-${n.loading ? 'loading codicon-modifier-spin' : `chevron-${open ? 'down' : 'right'}`}`, 'aria-hidden': 'true' }) : h('span', { class: 'twisty leaf', 'aria-hidden': 'true' });
             row.append(
                 h('div', { role: 'gridcell', class: 'c-name' }, indent, twisty, method(n.m, { tabindex: '-1' }), wait ? badge('waiting', 'muted') : null),
                 h('div', { role: 'gridcell', class: 'c-total' }, bar(n.incl / root, wait ? 'wait' : 'incl', wait ? 0 : selfShare), h('span', { class: 'num', text: dur(n.incl) })),
@@ -474,14 +519,22 @@
             if (n === focusNode) focusRow = row;
             frag.append(row);
             if (open) {
-                const size2 = n.c.length + (n.hidden ? 1 : 0);
-                n.c.forEach((c, k) => walk(c, depth + 1, k + 1, size2));
+                const children = n.c || [];
+                const size2 = children.length + (n.hidden || n.loadError ? 1 : 0);
+                children.forEach((c, k) => walk(c, depth + 1, k + 1, size2));
                 if (n.hidden) {
                     const moreIndent = h('span', { class: 'indent' });
                     moreIndent.style.width = `${indentWidth(depth + 1)}px`;
                     frag.append(h('div', { role: 'row', class: 'trow more', 'aria-level': depth + 2, 'aria-posinset': size2, 'aria-setsize': size2, tabindex: '-1' },
                         h('div', { role: 'gridcell', class: 'c-name' }, moreIndent, h('span', { class: 'twisty leaf' }),
                             h('span', { class: 'dim', text: `${n.hidden} smaller ${n.hidden === 1 ? 'call' : 'calls'} not shown` }))));
+                }
+                if (n.loadError) {
+                    const errorIndent = h('span', { class: 'indent' });
+                    errorIndent.style.width = `${indentWidth(depth + 1)}px`;
+                    frag.append(h('div', { role: 'row', class: 'trow more', 'aria-level': depth + 2, tabindex: '-1' },
+                        h('div', { role: 'gridcell', class: 'c-name' }, errorIndent, h('span', { class: 'twisty leaf' }),
+                            h('span', { class: 'dim', text: `Could not load calls: ${n.loadError}` }))));
                 }
             }
         };
@@ -522,13 +575,13 @@
             case 'PageDown': go(rows[Math.min(rows.length - 1, k + 15)]); break;
             case 'PageUp': go(rows[Math.max(0, k - 15)]); break;
             case 'ArrowRight':
-                if (!node || !node.c) return;
+                if (!node || !expandable(node)) return;
                 e.preventDefault();
                 if (!set.has(node)) toggle(q, node); else go(rows[k + 1]);
                 break;
             case 'ArrowLeft': {
                 e.preventDefault();
-                if (node && node.c && set.has(node)) { toggle(q, node); break; }
+                if (node && expandable(node) && set.has(node)) { toggle(q, node); break; }
                 const level = Number(row.getAttribute('aria-level'));
                 for (let j = k - 1; j >= 0; j--) if (Number(rows[j].getAttribute('aria-level')) < level) { go(rows[j]); break; }
                 break;
@@ -818,7 +871,21 @@
     if (window.ResizeObserver) new ResizeObserver(() => { if (S.report) scheduleTimeline(); }).observe($('timeline'));
 
     window.addEventListener('message', e => {
-        if (!e.data || e.data.type !== 'report') return;
+        if (!e.data) return;
+        if (e.data.type === 'traceChildren') {
+            const pending = pendingChildren.get(e.data.requestId);
+            if (!pending) return;
+            pendingChildren.delete(e.data.requestId);
+            pending.node.loading = null;
+            if (e.data.success) {
+                attachChildren(pending.q, pending.node, e.data);
+                if (pending.expand) S.expanded.get(pending.q).add(pending.node);
+            } else pending.node.loadError = e.data.message || 'Unknown error';
+            renderTree(pending.q);
+            pending.resolve(!!e.data.success);
+            return;
+        }
+        if (e.data.type !== 'report') return;
         S.report = e.data.report;
         waits.clear();
         for (const m of S.report.methods) if (m.wait) waits.add(m.m);

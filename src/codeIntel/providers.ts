@@ -794,7 +794,7 @@ export class CodeIntelligence implements vscode.Disposable, ToolsContribution {
         const md = new vscode.MarkdownString();
         if (symbol.objectType === 'AxEdt') {
             const parts = [props.EdtType && `type ${props.EdtType}`, props.Extends && `extends ${props.Extends}`, props.StringSize && `size ${props.StringSize}`,
-                props.EnumType && `enum ${props.EnumType}`, props.ReferenceTable && `table ${props.ReferenceTable}`].filter(Boolean);
+            props.EnumType && `enum ${props.EnumType}`, props.ReferenceTable && `table ${props.ReferenceTable}`].filter(Boolean);
             md.appendMarkdown(parts.join(' · ') || 'EDT');
         } else {
             const values = (read.enumValues ?? []) as { name: string; value?: number }[];
@@ -840,7 +840,8 @@ export class CodeIntelligence implements vscode.Disposable, ToolsContribution {
         }
         const key = document.uri.toString();
         clearTimeout(this.syntaxTimers.get(key));
-        this.syntaxTimers.set(key, setTimeout(() => void this.checkSyntax(document).catch(err => this.log.appendLine('Syntax check: ' + (err as Error).message)), 600));
+        this.syntaxTimers.set(key, setTimeout(() => void this.checkSyntax(document)
+            .catch(err => this.log.appendLine(`Syntax check ${document.uri.toString()}: ${(err as Error).message}`)), 600));
     }
 
     private async checkSyntax(document: vscode.TextDocument): Promise<void> {

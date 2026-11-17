@@ -5,11 +5,20 @@ import { openSearchItem } from './productivity/searchCode';
 import { XppServerClient } from './serverClient';
 import { registerPanelSerializer, stateAttribute } from './webviewState';
 
-interface TraceNode { m: string; n: number; incl: number; excl: number; sqlN?: number; sqlMs?: number; c?: TraceNode[]; hidden?: number }
+interface TraceNode { id: number; m: string; n: number; incl: number; excl: number; sqlN?: number; sqlMs?: number; hasChildren?: boolean; c?: TraceNode[] }
+
+interface TraceChildrenResult {
+    success: boolean;
+    message?: string;
+    nodes: (TraceNode & { parentId: number })[];
+    expanded: number[];
+    remaining?: number;
+}
 
 export interface TraceReport {
     success: boolean;
     message?: string;
+    traceSessionId: string;
     file: string;
     durationMs: number;
     events: number;
@@ -51,6 +60,7 @@ class TracePanel {
     private constructor(private readonly panel: vscode.WebviewPanel, private readonly context: vscode.ExtensionContext, private readonly server: XppServerClient, report: TraceReport) {
         panel.webview.html = this.html(report.file);
         panel.webview.onDidReceiveMessage(message => this.onMessage(message, report).catch(err => vscode.window.showErrorMessage((err as Error).message)));
+        panel.onDidDispose(() => server.closeTrace(report.traceSessionId).catch(() => undefined));
     }
 
     static show(context: vscode.ExtensionContext, server: XppServerClient, report: TraceReport): void {
@@ -66,7 +76,7 @@ class TracePanel {
         new TracePanel(panel, context, server, report);
     }
 
-    private async onMessage(message: { type: string; method?: string; text?: string }, report: TraceReport): Promise<void> {
+    private async onMessage(message: { type: string; method?: string; text?: string; requestId?: number; nodeId?: number }, report: TraceReport): Promise<void> {
         switch (message.type) {
             case 'ready':
                 await this.panel.webview.postMessage({ type: 'report', report });
@@ -78,6 +88,15 @@ class TracePanel {
                 await vscode.env.clipboard.writeText(message.text ?? '');
                 vscode.window.setStatusBarMessage('Copied', 2000);
                 break;
+            case 'traceChildren': {
+                try {
+                    const result = await this.server.traceChildren<TraceChildrenResult>(report.traceSessionId, message.nodeId ?? 0);
+                    await this.panel.webview.postMessage({ type: 'traceChildren', requestId: message.requestId, ...result });
+                } catch (err) {
+                    await this.panel.webview.postMessage({ type: 'traceChildren', requestId: message.requestId, success: false, message: (err as Error).message });
+                }
+                break;
+            }
         }
     }
 

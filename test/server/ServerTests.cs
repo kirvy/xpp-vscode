@@ -859,6 +859,29 @@ namespace XppVsCode.Server.Tests
             Assert.Equal(new[] { "C::work" }, path);
             Assert.Equal("C::work", Analysis.TraceAnalyzer.TopExclusive(a.Requests[0].Root, 1)[0].Key);
         }
+
+        [Fact]
+        public void TraceSessionExpandsDeepCallStacksInResumableBatches()
+        {
+            var analyzer = new Analysis.TraceAnalyzer();
+            Enter(analyzer, 1, 0, "Root::run");
+            for (int depth = 1; depth <= 60; depth++)
+                Enter(analyzer, 1, depth, $"C{depth}::run");
+            analyzer.Finish(100);
+
+            var session = new Host.TraceService.TraceSession(analyzer);
+            int rootId = (int)session.Stub(analyzer.Requests[0].Root)["id"];
+            var first = session.Expand(rootId);
+            var firstNodes = Assert.IsType<List<Dictionary<string, object>>>(first["nodes"]);
+            Assert.Equal(50, firstNodes.Count);
+            Assert.Equal("C50::run", firstNodes[49]["m"]);
+
+            int continuationId = (int)firstNodes[49]["id"];
+            var second = session.Expand(continuationId);
+            var secondNodes = Assert.IsType<List<Dictionary<string, object>>>(second["nodes"]);
+            Assert.Equal(10, secondNodes.Count);
+            Assert.Equal("C60::run", secondNodes[9]["m"]);
+        }
     }
 
     public class XppSignatureTests

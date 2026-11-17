@@ -40,6 +40,13 @@ setTimeout(() => { console.log('TIMEOUT'); child.kill(); process.exit(1); }, 600
         check('AOS and sessions listed', report.aos.length > 0 && report.sessions.length > 0, `${report.aos.length} AOS, ${report.sessions.length} sessions`);
         check('requests carry AOS and session', report.requests.every(r => typeof r.aos === 'string' && 'session' in r));
         check('errors carry a stack ending in the method', report.errors.every(e => e.stack.length > 0 && (e.kind === 'exception' || e.stack[e.stack.length - 1] === e.method)), `${report.errors.length} errors`);
+        const expandable = report.requests.find(r => r.tree?.hasChildren);
+        check('progressive roots carry a trace session and node ids', !!report.traceSessionId && report.requests.every(r => Number.isInteger(r.tree?.id)));
+        if (expandable) {
+            const childRaw = (await call('xpp/trace', { action: 'children', body: { traceSessionId: report.traceSessionId, nodeId: expandable.tree.id } })).result;
+            const children = typeof childRaw === 'string' ? JSON.parse(childRaw) : childRaw;
+            check('progressive child batch', children.success && children.nodes.length > 0 && children.nodes.every(n => Number.isInteger(n.id) && Number.isInteger(n.parentId)), `${children.nodes?.length} nodes`);
+        }
         const busiest = report.sessions.find(s => s.session && s.xppCalls > 0);
         if (busiest) {
             const byTrace = (await call('xpp/trace', { action: 'analyze', body: { path: etl, session: busiest.session, aos: busiest.aos } })).result;
